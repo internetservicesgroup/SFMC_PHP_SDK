@@ -115,6 +115,7 @@ class ET_Client extends SoapClient
         if (! empty($this->proxyPassword)) {
             $soapOptions['proxy_password'] = $this->proxyPassword;
         }
+        
         parent::__construct($this->xmlLoc, $soapOptions);
         parent::__setLocation($this->endpoint);
     }
@@ -571,6 +572,10 @@ class ET_Client extends SoapClient
         $postC->props = $arrayOfContentAreas;
         $sendResponse = $postC->post();
         return $sendResponse;
+    }
+    
+    function getProxy(){
+        return $this->proxy;
     }
 }
 
@@ -1212,10 +1217,58 @@ class ET_GetRest extends ET_Constructor
 class ET_PostRest extends ET_Constructor
 {
 
-    function __construct($authStub, $url, $props)
+    //function __construct($authStub, $url, $props)
+    //function __construct($authStub, $url, $props, $authenticationToken='')
+    //called function 'restPost' has been modified to accept '$proxy' as parameter instead of '$authstub'. Hence modifying the calling function as well, to pass '$proxy' 
+    function __construct($proxy, $url, $props, $authenticationToken='')
     {
-        $restResponse = restPost($url, json_encode($props));
+        //$restResponse = restPost($url, json_encode($props));
+        //$restResponse = restPost($url, json_encode($props),$proxy,$authenticationToken);
+        $restResponse = restPost($url, $props,$proxy,$authenticationToken);
         parent::__construct($restResponse->body, $restResponse->httpcode, true);
+    }
+}
+
+//Additional Class created as SDK does npt yet have a direct class to fire Journey Entry Events
+class ET_JourneyEntryEvent extends ET_BaseObject
+{
+    public $contactkey, $eventdefinitionkey, $establishcontactkey, $data;
+    private $url = 'https://www.exacttargetapis.com/interaction/v1/events';
+
+    //function __construct($authStub, $url, $props)
+    function __construct()
+    {
+    }
+    
+    /**
+     * 
+     * @param type $authStub Object of the class ET_client
+     * @param type $url URL to which Post request is to be made
+     * @param type $props The json encoded body of the post request  
+     */
+    function fireEntryEvent(){
+        if(isset($this->authStub) && isset($this->contactkey) && isset($this->eventdefinitionkey)){
+            $this->authStub->refreshToken();
+            $props = array();
+            $props['contactkey'] = $this->contactkey;
+            $props['eventdefinitionkey'] = $this->eventdefinitionkey;
+            
+            if(isset($this->establishcontactkey)){
+                $props['establishcontactkey'] = $this->establishcontactkey;
+            }
+            
+            if(isset($this->data)){
+                $props['data'] = $this->data;
+            }
+            
+            $props = json_encode($props);
+            $response = new ET_PostRest($this->authStub->getProxy(), $this->url, $props, $this->authStub->getAuthToken());
+            
+            return $response;
+        }else{
+            throw new Exception("Unable to process request due Internal server error. Please contact GUM Admin");							
+        }
+        
     }
 }
 
@@ -2183,10 +2236,12 @@ function restGet($url, $proxy = NULL)
  *            The resource URL for the REST API
  * @param string $content
  *            A string of JSON which will be passed to the REST API
- *            
+ * @param string $proxy Optional. Proxy details for the Curl connection
+ * @param string $authenticationToken Optional. The Auth Token to be added to the header of the Curl request(BAsic Authentication)            
  * @return string The response payload from the REST service
  */
-function restPost($url, $content, $proxy = NULL)
+//function restPost($url, $content, $proxy = NULL)
+function restPost($url, $content, $proxy = NULL, $authenticationToken="")
 {
     $ch = curl_init();
     
@@ -2198,10 +2253,27 @@ function restPost($url, $content, $proxy = NULL)
         "Content-Type: application/json",
         "User-Agent: " . getSDKVersion()
     );
+    if($authenticationToken !== ""){
+            $authorization = "Authorization: Bearer ".$authenticationToken;
+            $headers = array("Content-Type: application/json", "User-Agent: ". getSDKVersion(), $authorization);
+    }
+    
     curl_setopt($ch, CURLOPT_HTTPHEADER, $headers);
     if ($proxy) {
         curl_setopt($ch, CURLOPT_PROXY, $proxy);
     }
+    
+//    //proxy setting
+//    if (!empty($authStub->proxyHost)) {
+//            curl_setopt($ch, CURLOPT_PROXY, $authStub->proxyHost);
+//    }
+//    if (!empty($authStub->proxyPort)) {
+//            curl_setopt($ch, CURLOPT_PROXYPORT, $authStub->proxyPort);
+//    }
+//    if (!empty($authStub->proxyUserName) && !empty($authStub->proxyPassword)) {
+//            curl_setopt($ch, CURLOPT_PROXYAUTH, CURLAUTH_BASIC);
+//            curl_setopt($ch, CURLOPT_PROXYUSERPWD, $authStub->proxyUserName.':'.$authStub->proxyPassword);
+//    }
     
     // The content is the JSON payload that defines the request
     curl_setopt($ch, CURLOPT_POSTFIELDS, $content);
@@ -2213,6 +2285,7 @@ function restPost($url, $content, $proxy = NULL)
     curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, false);
     
     $outputJSON = curl_exec($ch);
+    
     $responseObject = new stdClass();
     $responseObject->body = $outputJSON;
     $responseObject->httpcode = curl_getinfo($ch, CURLINFO_HTTP_CODE);
